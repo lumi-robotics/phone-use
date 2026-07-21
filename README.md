@@ -1,5 +1,7 @@
 # phone-use
 
+[![CI](https://github.com/lumi-robotics/phone-use/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/lumi-robotics/phone-use/actions/workflows/ci.yml?query=branch%3Amain)
+
 A small Python SDK for phone automation. It calls a running automation service over HTTP and forwards model configuration to the service.
 
 ## Installation
