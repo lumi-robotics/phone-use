@@ -12,6 +12,12 @@ from .exceptions import PhoneUseAPIError, PhoneUseNetworkError
 
 JsonObject = dict[str, Any]
 
+# Extra headroom (seconds) added on top of a request's own timeout_s/timeout_ms
+# so the local socket read doesn't get cut off right as the server-side
+# deadline elapses, and the server has a chance to respond with its own
+# timeout error first.
+_TIMEOUT_BUFFER_S = 5.0
+
 
 class PhoneUse:
     """Synchronous client for the phone automation HTTP API."""
@@ -200,24 +206,43 @@ class PhoneUse:
         timeout_s: float | None = None,
     ) -> JsonObject:
         """Cancel an asynchronous task."""
+        payload = self._compact(
+            {
+                "reason": reason,
+                "stop_device": stop_device,
+                "timeout_s": timeout_s,
+            }
+        )
         return self._request_json(
             "DELETE",
             self._task_path(task_id),
-            self._compact(
-                {
-                    "reason": reason,
-                    "stop_device": stop_device,
-                    "timeout_s": timeout_s,
-                }
-            ),
+            payload,
+            timeout=self._resolve_timeout(payload),
         )
 
     def _post(self, action: str, payload: JsonObject) -> JsonObject:
+        compacted = self._compact(payload)
         return self._request_json(
             "POST",
             self._device_path(action),
-            self._compact(payload),
+            compacted,
+            timeout=self._resolve_timeout(compacted),
         )
+
+    def _resolve_timeout(self, payload: Mapping[str, Any]) -> float:
+        """Pick a socket timeout that can accommodate a request's own
+        timeout_s/timeout_ms, so a slower-than-default server-side deadline
+        (e.g. ``act(..., timeout_s=60)``) isn't cut short by the client's
+        constructor-level ``timeout`` (default 30s).
+        """
+        candidates = [self.timeout]
+        timeout_s = payload.get("timeout_s")
+        if isinstance(timeout_s, (int, float)) and not isinstance(timeout_s, bool):
+            candidates.append(float(timeout_s) + _TIMEOUT_BUFFER_S)
+        timeout_ms = payload.get("timeout_ms")
+        if isinstance(timeout_ms, (int, float)) and not isinstance(timeout_ms, bool):
+            candidates.append(float(timeout_ms) / 1000.0 + _TIMEOUT_BUFFER_S)
+        return max(candidates)
 
     def _with_model(
         self,
@@ -252,8 +277,10 @@ class PhoneUse:
         method: str,
         path: str,
         payload: JsonObject | None = None,
+        *,
+        timeout: float | None = None,
     ) -> JsonObject:
-        body = self._request(method, path, payload)
+        body = self._request(method, path, payload, timeout=timeout)
         try:
             value = json.loads(body)
         except (UnicodeDecodeError, json.JSONDecodeError) as exc:
@@ -267,6 +294,8 @@ class PhoneUse:
         method: str,
         path: str,
         payload: JsonObject | None = None,
+        *,
+        timeout: float | None = None,
     ) -> bytes:
         headers = {"Accept": "application/json", **self.headers}
         data = None
@@ -281,7 +310,9 @@ class PhoneUse:
             method=method,
         )
         try:
-            with urlopen(request, timeout=self.timeout) as response:
+            with urlopen(
+                request, timeout=self.timeout if timeout is None else timeout
+            ) as response:
                 return response.read()
         except HTTPError as exc:
             body = exc.read()
