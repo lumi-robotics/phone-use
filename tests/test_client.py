@@ -32,8 +32,11 @@ class APIHandler(BaseHTTPRequestHandler):
             self._json(409, {"error": {"message": "automation is busy"}})
             return
         delay_s = payload.get("delay_s")
-        if isinstance(delay_s, (int, float)):
-            time.sleep(delay_s)
+        if (
+            isinstance(delay_s, (int, float))
+            and not isinstance(delay_s, bool)
+        ):
+            time.sleep(float(delay_s))
         self._json(200, {"ok": True, "payload": payload})
 
     def do_DELETE(self) -> None:
