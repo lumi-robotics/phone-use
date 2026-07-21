@@ -32,6 +32,10 @@ Constructor parameters:
 
 Model parameters are sent as a model object to act, query_string, wait_for, and asynchronous ai_act tasks. Screenshots, device queries, and coordinate actions do not include model parameters.
 
+### Timeouts
+
+`timeout` is the client's socket-level timeout in seconds and applies to every request by default. If a call also includes its own `timeout_s` or `timeout_ms` (e.g. `phone.act(..., timeout_s=60)`), the client automatically extends the socket timeout for that request to `timeout_s`/`timeout_ms` plus a 5-second buffer, so the local connection isn't cut off before the server's own deadline elapses. Calls without a `timeout_s`/`timeout_ms` option continue to use the constructor's `timeout` unchanged.
+
 ## Service and Devices
 
 ~~~python

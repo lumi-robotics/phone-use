@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 import tempfile
 import threading
+import time
 import unittest
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
@@ -30,6 +31,12 @@ class APIHandler(BaseHTTPRequestHandler):
         if self.path == "/error":
             self._json(409, {"error": {"message": "automation is busy"}})
             return
+        delay_s = payload.get("delay_s")
+        if (
+            isinstance(delay_s, (int, float))
+            and not isinstance(delay_s, bool)
+        ):
+            time.sleep(float(delay_s))
         self._json(200, {"ok": True, "payload": payload})
 
     def do_DELETE(self) -> None:
@@ -236,6 +243,37 @@ class PhoneUseTest(unittest.TestCase):
         client = PhoneUse("http://127.0.0.1:1", timeout=0.1)
         with self.assertRaises(PhoneUseNetworkError):
             client.health()
+
+    def test_timeout_s_extends_socket_timeout(self) -> None:
+        # A short constructor timeout should not cut off a request that
+        # explicitly asked the server for a longer timeout_s/timeout_ms.
+        client = PhoneUse(
+            f"http://127.0.0.1:{self.server.server_port}",
+            device_id="phone one",
+            timeout=0.5,
+        )
+        result = client.act("Open Settings", timeout_s=3, delay_s=1.2)
+        self.assertTrue(result["ok"])
+
+    def test_without_override_short_timeout_still_applies(self) -> None:
+        # Without a per-request timeout_s/timeout_ms, the constructor's
+        # timeout is still the effective ceiling.
+        client = PhoneUse(
+            f"http://127.0.0.1:{self.server.server_port}",
+            device_id="phone one",
+            timeout=0.3,
+        )
+        with self.assertRaises(PhoneUseNetworkError):
+            client.tap(1, 2, delay_s=0.8)
+
+    def test_resolve_timeout(self) -> None:
+        client = PhoneUse(
+            f"http://127.0.0.1:{self.server.server_port}", timeout=10
+        )
+        self.assertEqual(client._resolve_timeout({}), 10)
+        self.assertEqual(client._resolve_timeout({"timeout_s": 60}), 65)
+        self.assertEqual(client._resolve_timeout({"timeout_ms": 30_000}), 35)
+        self.assertEqual(client._resolve_timeout({"timeout_s": 1}), 10)
 
 
 if __name__ == "__main__":
